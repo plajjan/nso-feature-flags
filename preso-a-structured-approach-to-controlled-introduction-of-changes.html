@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>A structured approach to controlled introduction of changes</title>
+<meta name="author" content="Kristian Larsson"/>
+<style type="text/css">
+.underline { text-decoration: underline; }
+</style>
+<link rel="stylesheet" href="./reveal.js/css/reveal.css"/>
+
+<link rel="stylesheet" href="./reveal.js/css/theme/white.css" id="theme"/>
+
+<link rel="stylesheet" href="preso.css"/>
+
+<!-- If the query includes 'print-pdf', include the PDF print sheet -->
+<script>
+    if( window.location.search.match( /print-pdf/gi ) ) {
+        var link = document.createElement( 'link' );
+        link.rel = 'stylesheet';
+        link.type = 'text/css';
+        link.href = './reveal.js/css/print/pdf.css';
+        document.getElementsByTagName( 'head' )[0].appendChild( link );
+    }
+</script>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<section>
+<section id="slide-orgbc32ae7">
+<h2 id="orgbc32ae7">A structured approach to controlled introduction of changes</h2>
+
+</section>
+</section>
+<section>
+<section id="slide-orgaca9b97">
+<h2 id="orgaca9b97">Agenda</h2>
+<ul>
+<li>nomenclature</li>
+<li>phased rollout success condition
+<ul>
+<li>configuration validity &amp; service health</li>
+
+</ul></li>
+<li>life cycle management / introducing change
+<ul>
+<li>problem definition</li>
+
+</ul></li>
+<li>a solution: feature-flags</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-orga24e142">
+<h2 id="orga24e142">Automation changes over time</h2>
+<ul>
+<li>automation is the embodiment of processes in programmatic fashion</li>
+<li>products and processes change, thus automation must change over time</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-orgf9e9e57">
+<h2 id="orgf9e9e57">Nomenclature</h2>
+<ul>
+<li>blast radius containment</li>
+<li>phased rollout</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-org3f3d317">
+<h2 id="org3f3d317">Blast radius containment</h2>
+<ul>
+<li>strictly about limiting impact of a change</li>
+<li>for example, make sure we cannot commit to more than X devices in one transaction
+<ul>
+<li>this would prevent making one network wide transaction changing all instances of Y at the same time</li>
+
+</ul></li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-org17dc503">
+<h2 id="org17dc503">Phased rollout</h2>
+<ul>
+<li>method of rolling out a change in controlled fashion by applying a subset of the change at a time</li>
+<li>for example, total change is to 1000 devices
+<ul>
+<li>start by changing one device</li>
+<li>validate change went well</li>
+<li>proceed with changing next device</li>
+<li>validate and proceed to next</li>
+<li>repeat for all devices&#x2026;
+<ul>
+<li>or abort on failure</li>
+
+</ul></li>
+
+</ul></li>
+
+</ul>
+
+</section>
+<section id="slide-org704ba20">
+<h3 id="org704ba20">Phased rollout success condition</h3>
+<ul>
+<li>key to phased rollout is concept of <b>success condition</b></li>
+<li>we roll out change in small parts - sliding window</li>
+<li>how do we know if a change went well?</li>
+<li>how do we know if we can proceed and configure next device?</li>
+
+</ul>
+
+</section>
+<section id="slide-orge1c922b">
+<h3 id="orge1c922b">Configuration validity</h3>
+<ul>
+<li>configuration commit only includes syntax and semantic checks
+<ul>
+<li>an empty configuration is valid
+<ul>
+<li>but would lead to unhealthy device / service</li>
+
+</ul></li>
+
+</ul></li>
+<li>thus, need concept of <b>success condition</b> beyond basic config validity</li>
+
+</ul>
+
+</section>
+<section id="slide-org7890145">
+<h3 id="org7890145">Service health</h3>
+<ul>
+<li>need to understand if service is <b>healthy</b></li>
+<li>monitor operational state of service
+<ul>
+<li>is BGP neighbor up?</li>
+<li>is interface up?</li>
+<li>can we ping?</li>
+
+</ul></li>
+<li>service specific! not generic&#x2026;</li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-org078558b">
+<h2 id="org078558b">Introducing (naive) change</h2>
+<ul>
+<li>change service configuration template</li>
+<li>git commit</li>
+<li>deploy new NSO package</li>
+<li>re-deploy service instances</li>
+
+</ul>
+<p>
+-&gt; new config is now active in network
+</p>
+
+</section>
+<section id="slide-org1fd8e07">
+<h3 id="org1fd8e07">Example change</h3>
+<ul>
+<li>modify MTU of service from default (1500) to 9100</li>
+
+</ul>
+
+</section>
+<section id="slide-org0aed38a">
+<h3 id="org0aed38a">Change service template</h3>
+<div class="org-src-container">
+
+<pre  class="src src-xml">&lt;<span style="color: #bc6ec5; font-weight: bold;">config-template</span> <span style="color: #4f97d7;">xmlns</span>=<span style="color: #2d9574;">"http://tail-f.com/ns/config/1.0"</span>&gt;
+    &lt;<span style="color: #bc6ec5; font-weight: bold;">devices</span> <span style="color: #4f97d7;">xmlns</span>=<span style="color: #2d9574;">"http://tail-f.com/ns/ncs"</span>&gt;
+
+        &lt;<span style="color: #bc6ec5; font-weight: bold;">device</span> <span style="color: #7590db;">tags</span>=<span style="color: #2d9574;">"nocreate"</span>&gt;
+            &lt;<span style="color: #bc6ec5; font-weight: bold;">name</span>&gt;{/device}&lt;/<span style="color: #bc6ec5; font-weight: bold;">name</span>&gt;
+            &lt;<span style="color: #bc6ec5; font-weight: bold;">config</span> <span style="color: #7590db;">tags</span>=<span style="color: #2d9574;">"merge"</span>&gt;
+                &lt;<span style="color: #bc6ec5; font-weight: bold;">interface-configurations</span> <span style="color: #4f97d7;">xmlns</span>=<span style="color: #2d9574;">"http://cisco.com/ns/yang/Cisco-IOS-XR-ifmgr-cfg"</span>&gt;
+                    &lt;<span style="color: #bc6ec5; font-weight: bold;">interface-configuration</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">active</span>&gt;act&lt;/<span style="color: #bc6ec5; font-weight: bold;">active</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">interface-name</span>&gt;{/interface}&lt;/<span style="color: #bc6ec5; font-weight: bold;">interface-name</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">description</span>&gt;Link to {/remote/device} [{/remote/interface}]&lt;/<span style="color: #bc6ec5; font-weight: bold;">description</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">mtus</span>&gt;
+                            &lt;<span style="color: #bc6ec5; font-weight: bold;">mtu</span>&gt;
+                                &lt;<span style="color: #bc6ec5; font-weight: bold;">owner</span>&gt;{$INTERFACE_TYPE}&lt;/<span style="color: #bc6ec5; font-weight: bold;">owner</span>&gt;
+                                <span style="color: #2aa1ae; background-color: #292e34;">&lt;!-- </span><span style="color: #2aa1ae; background-color: #292e34;">new hard-coded MTU </span><span style="color: #2aa1ae; background-color: #292e34;">--&gt;</span>
+                                &lt;<span style="color: #bc6ec5; font-weight: bold;">mtu</span>&gt;9100&lt;/<span style="color: #bc6ec5; font-weight: bold;">mtu</span>&gt;
+                            &lt;/<span style="color: #bc6ec5; font-weight: bold;">mtu</span>&gt;
+                        &lt;/<span style="color: #bc6ec5; font-weight: bold;">mtus</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">shutdown</span> <span style="color: #7590db;">tags</span>=<span style="color: #2d9574;">"delete"</span> <span style="color: #7590db;">when</span>=<span style="color: #2d9574;">"{/shutdown='false'}"</span>/&gt;
+                        <span style="color: #2aa1ae; background-color: #292e34;">&lt;!-- </span><span style="color: #2aa1ae; background-color: #292e34;">... other config stuff ... </span><span style="color: #2aa1ae; background-color: #292e34;">--&gt;</span>
+                    &lt;/<span style="color: #bc6ec5; font-weight: bold;">interface-configuration</span>&gt;
+                &lt;/<span style="color: #bc6ec5; font-weight: bold;">interface-configurations</span>&gt;
+            &lt;/<span style="color: #bc6ec5; font-weight: bold;">config</span>&gt;
+        &lt;/<span style="color: #bc6ec5; font-weight: bold;">device</span>&gt;
+    &lt;/<span style="color: #bc6ec5; font-weight: bold;">devices</span>&gt;
+&lt;/<span style="color: #bc6ec5; font-weight: bold;">config-template</span>&gt;
+</pre>
+</div>
+
+</section>
+<section id="slide-org6a5b11f">
+<h3 id="org6a5b11f">Benefit of hard-coded value</h3>
+<ul>
+<li><b>no</b> choice means <b>avoiding</b> test cases - good!</li>
+<li>configurable MTU means we need to test all or reasonable set of values</li>
+<li>combinatorial explosion with many config knobs</li>
+
+</ul>
+
+</section>
+<section id="slide-orgb952e1c" data-background="./loaded-gun.jpg">
+<h3 id="orgb952e1c"><font color="white"> Loaded gun scenario</font></h3>
+
+</section>
+<section id="slide-org4716c5c">
+<h3 id="org4716c5c">latent change = loaded gun</h3>
+<ul>
+<li>latent change in service code = loaded gun
+<ul>
+<li>starts when service package is deployed</li>
+<li>end when service is re-deployed</li>
+
+</ul></li>
+
+</ul>
+
+<div class="figure">
+<p><img src="loaded-gun-timeframe.png" alt="loaded-gun-timeframe.png" />
+</p>
+</div>
+
+</section>
+<section id="slide-orgd0b86c2">
+<h3 id="orgd0b86c2">Kalle fired the gun</h3>
+<ul>
+<li>anyone else coming in doing (trivial) change in loaded gun window will inadvertently push MTU change
+<ul>
+<li>Kalle wants to fix spelling mistake in description
+<ul>
+<li>considered trivial, didn't do <code>commit dry-run</code></li>
+<li>pushes MTU change causing service outage</li>
+
+</ul></li>
+
+</ul></li>
+
+</ul>
+
+</section>
+<section id="slide-orgb938c94">
+<h3 id="orgb938c94">No revert</h3>
+<ul>
+<li>template change &amp; re-deploy moves forward</li>
+<li>no way back
+<ul>
+<li>except rollback, but only works for naive scenario</li>
+<li>interleaved transactions make rollback useless</li>
+
+</ul></li>
+
+</ul>
+
+<div class="figure">
+<p><img src="re-deploy-rollback-bad-flow.png" alt="re-deploy-rollback-bad-flow.png" />
+</p>
+</div>
+
+</section>
+<section id="slide-org9a143c2">
+<h3 id="org9a143c2">Feature grouping</h3>
+<ul>
+<li>we implement feature A and feature B</li>
+<li>both are merged to master &amp; deploy new NSO package</li>
+<li>service re-deploy deploys both A &amp; B
+<ul>
+<li>impossible to selectively enable A or B</li>
+<li>if A or B causes problems we need to roll back both</li>
+
+</ul></li>
+<li>BAD: feature A &amp; B have inadvertently been <b>grouped</b> together
+<ul>
+<li>development time is <b>tightly coupled</b> to operations</li>
+
+</ul></li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-orga5a0c5c">
+<h2 id="orga5a0c5c">goals</h2>
+<ul>
+<li>no loaded gun</li>
+<li>going backwards rollback</li>
+<li>success condition / service health</li>
+<li>avoid combinatorial explosion
+<ul>
+<li>allows testing</li>
+
+</ul></li>
+
+</ul>
+
+</section>
+</section>
+<section>
+<section id="slide-orgcbd6e0b">
+<h2 id="orgcbd6e0b">feature-flags</h2>
+<ul>
+<li>well known concept in software development</li>
+<li>move introduction of change from commit/deploy time to run time
+<ul>
+<li>temporal decoupling of development and operations!!!</li>
+
+</ul></li>
+<li>focus on transition / change</li>
+<li>limited life time</li>
+
+</ul>
+
+</section>
+<section id="slide-org081079b">
+<h3 id="org081079b">Feature-flag</h3>
+<ul>
+<li>emphasize old -&gt; new transition</li>
+
+</ul>
+<div class="org-src-container">
+
+<pre  class="src src-yang"><span style="color: #4f97d7; font-weight: bold;">list</span> <span style="color: #ce537a; font-weight: bold;">backbone-interface</span> <span style="color: #4f97d7;">{</span>
+  <span style="color: #4f97d7; font-weight: bold;">key</span> <span style="color: #2d9574;">"device interface"</span>;
+  <span style="color: #2aa1ae; background-color: #292e34;">// </span><span style="color: #2aa1ae; background-color: #292e34;">other things</span>
+
+  <span style="color: #4f97d7; font-weight: bold;">container</span> <span style="color: #ce537a; font-weight: bold;">feature-flags</span> <span style="color: #bc6ec5;">{</span>
+    <span style="color: #4f97d7; font-weight: bold;">leaf</span> <span style="color: #ce537a; font-weight: bold;">high-mtu</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #4f97d7; font-weight: bold;">type</span> <span style="color: #ce537a; font-weight: bold;">boolean</span>;
+      <span style="color: #4f97d7; font-weight: bold;">description</span> <span style="color: #2d9574;">"Enable new high MTU (9100). Disable for old MTU (1500)"</span>;
+      <span style="color: #4f97d7; font-weight: bold;">default</span> <span style="color: #2d9574;">"false"</span>;
+    <span style="color: #2d9574;">}</span>
+  <span style="color: #bc6ec5;">}</span>
+<span style="color: #4f97d7;">}</span>
+</pre>
+</div>
+
+</section>
+<section id="slide-org1840878">
+<h3 id="org1840878">Feature-flag in template</h3>
+<div class="org-src-container">
+
+<pre  class="src src-xml">&lt;<span style="color: #bc6ec5; font-weight: bold;">config-template</span> <span style="color: #4f97d7;">xmlns</span>=<span style="color: #2d9574;">"http://tail-f.com/ns/config/1.0"</span>&gt;
+    &lt;<span style="color: #bc6ec5; font-weight: bold;">devices</span> <span style="color: #4f97d7;">xmlns</span>=<span style="color: #2d9574;">"http://tail-f.com/ns/ncs"</span>&gt;
+
+        &lt;<span style="color: #bc6ec5; font-weight: bold;">device</span> <span style="color: #7590db;">tags</span>=<span style="color: #2d9574;">"nocreate"</span>&gt;
+            &lt;<span style="color: #bc6ec5; font-weight: bold;">name</span>&gt;{/device}&lt;/<span style="color: #bc6ec5; font-weight: bold;">name</span>&gt;
+            &lt;<span style="color: #bc6ec5; font-weight: bold;">config</span> <span style="color: #7590db;">tags</span>=<span style="color: #2d9574;">"merge"</span>&gt;
+                &lt;<span style="color: #bc6ec5; font-weight: bold;">interface-configurations</span> <span style="color: #4f97d7;">xmlns</span>=<span style="color: #2d9574;">"http://cisco.com/ns/yang/Cisco-IOS-XR-ifmgr-cfg"</span>&gt;
+                    &lt;<span style="color: #bc6ec5; font-weight: bold;">interface-configuration</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">active</span>&gt;act&lt;/<span style="color: #bc6ec5; font-weight: bold;">active</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">interface-name</span>&gt;{/interface}&lt;/<span style="color: #bc6ec5; font-weight: bold;">interface-name</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">description</span>&gt;Link to {/remote/device} [{/remote/interface}]&lt;/<span style="color: #bc6ec5; font-weight: bold;">description</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">mtus</span>&gt;
+                            &lt;<span style="color: #bc6ec5; font-weight: bold;">mtu</span>&gt;
+                                &lt;<span style="color: #bc6ec5; font-weight: bold;">owner</span>&gt;{$INTERFACE_TYPE}&lt;/<span style="color: #bc6ec5; font-weight: bold;">owner</span>&gt;
+                                <span style="color: #2aa1ae; background-color: #292e34;">&lt;!-- </span><span style="color: #2aa1ae; background-color: #292e34;">new high MTU conditioned on feature-flags </span><span style="color: #2aa1ae; background-color: #292e34;">--&gt;</span>
+                                &lt;<span style="color: #bc6ec5; font-weight: bold;">mtu</span> <span style="color: #7590db;">when</span>=<span style="color: #2d9574;">"/feature-flags/high-mtu='true'"</span>&gt;9100&lt;/<span style="color: #bc6ec5; font-weight: bold;">mtu</span>&gt;
+                            &lt;/<span style="color: #bc6ec5; font-weight: bold;">mtu</span>&gt;
+                        &lt;/<span style="color: #bc6ec5; font-weight: bold;">mtus</span>&gt;
+                        &lt;<span style="color: #bc6ec5; font-weight: bold;">shutdown</span> <span style="color: #7590db;">tags</span>=<span style="color: #2d9574;">"delete"</span> <span style="color: #7590db;">when</span>=<span style="color: #2d9574;">"{/shutdown='false'}"</span>/&gt;
+                        <span style="color: #2aa1ae; background-color: #292e34;">&lt;!-- </span><span style="color: #2aa1ae; background-color: #292e34;">... other config stuff ... </span><span style="color: #2aa1ae; background-color: #292e34;">--&gt;</span>
+                    &lt;/<span style="color: #bc6ec5; font-weight: bold;">interface-configuration</span>&gt;
+                &lt;/<span style="color: #bc6ec5; font-weight: bold;">interface-configurations</span>&gt;
+            &lt;/<span style="color: #bc6ec5; font-weight: bold;">config</span>&gt;
+        &lt;/<span style="color: #bc6ec5; font-weight: bold;">device</span>&gt;
+    &lt;/<span style="color: #bc6ec5; font-weight: bold;">devices</span>&gt;
+&lt;/<span style="color: #bc6ec5; font-weight: bold;">config-template</span>&gt;
+</pre>
+</div>
+
+</section>
+<section id="slide-org12c1273">
+<h3 id="org12c1273">Sociotechnical</h3>
+<ul>
+<li>technically, FF is <i>just another input</i></li>
+<li>NSO won't treat it differently</li>
+<li>difference is in concept
+<ul>
+<li>clear life cycle for FF</li>
+<li>introduce FF for change transition</li>
+<li>when done, <b>remove</b> FF
+<ul>
+<li>keeps down input / permutations over time</li>
+
+</ul></li>
+
+</ul></li>
+
+</ul>
+
+</section>
+<section id="slide-org383f502">
+<h3 id="org383f502">feature-flag life cycle</h3>
+
+<div class="figure">
+<p><img src="./ff-lifecycle.png" alt="ff-lifecycle.png" />
+</p>
+</div>
+
+</section>
+<section id="slide-org0a7f785">
+<h3 id="org0a7f785">ANTI-PATTERN</h3>
+<ul>
+<li>we could introduce new MTU leaf</li>
+<li>allows arbitrary pick of MTU</li>
+<li>BAD - we want choice of 1500 or 9100</li>
+<li>reduce choice / permutations</li>
+
+</ul>
+<div class="org-src-container">
+
+<pre  class="src src-yang"><span style="color: #4f97d7; font-weight: bold;">list</span> <span style="color: #ce537a; font-weight: bold;">backbone-interface</span> <span style="color: #4f97d7;">{</span>
+  <span style="color: #4f97d7; font-weight: bold;">key</span> <span style="color: #2d9574;">"device interface"</span>;
+  <span style="color: #2aa1ae; background-color: #292e34;">// </span><span style="color: #2aa1ae; background-color: #292e34;">other things</span>
+
+  <span style="color: #4f97d7; font-weight: bold;">leaf</span> <span style="color: #ce537a; font-weight: bold;">mtu</span> <span style="color: #bc6ec5;">{</span>
+    <span style="color: #4f97d7; font-weight: bold;">type</span> <span style="color: #ce537a; font-weight: bold;">uint16</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #4f97d7; font-weight: bold;">range</span> <span style="color: #2d9574;">"1500..9100"</span>;
+    <span style="color: #2d9574;">}</span>
+    <span style="color: #4f97d7; font-weight: bold;">description</span> <span style="color: #2d9574;">"MTU of service"</span>;
+    <span style="color: #4f97d7; font-weight: bold;">default</span> <span style="color: #2d9574;">"1500"</span>;
+  <span style="color: #bc6ec5;">}</span>
+<span style="color: #4f97d7;">}</span>
+</pre>
+</div>
+
+</section>
+<section id="slide-org0d6b274">
+<h3 id="org0d6b274">ANTI-PATTERN</h3>
+<ul>
+<li>better, reduction of choice to 2 values</li>
+<li>still, over time, new config knobs leads to combinatorial explosion</li>
+<li>focus on transitional nature</li>
+
+</ul>
+<div class="org-src-container">
+
+<pre  class="src src-yang"><span style="color: #4f97d7; font-weight: bold;">list</span> <span style="color: #ce537a; font-weight: bold;">backbone-interface</span> <span style="color: #4f97d7;">{</span>
+  <span style="color: #4f97d7; font-weight: bold;">key</span> <span style="color: #2d9574;">"device interface"</span>;
+  <span style="color: #2aa1ae; background-color: #292e34;">// </span><span style="color: #2aa1ae; background-color: #292e34;">other things</span>
+
+  <span style="color: #4f97d7; font-weight: bold;">leaf</span> <span style="color: #ce537a; font-weight: bold;">mtu</span> <span style="color: #bc6ec5;">{</span>
+    <span style="color: #4f97d7; font-weight: bold;">type</span> <span style="color: #ce537a; font-weight: bold;">uint16</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #4f97d7; font-weight: bold;">range</span> <span style="color: #2d9574;">"1500 | 9100"</span>;
+    <span style="color: #2d9574;">}</span>
+    <span style="color: #4f97d7; font-weight: bold;">description</span> <span style="color: #2d9574;">"MTU of service, either 1500 (old) or 9100 (new)"</span>;
+    <span style="color: #4f97d7; font-weight: bold;">default</span> <span style="color: #2d9574;">"1500"</span>;
+  <span style="color: #bc6ec5;">}</span>
+<span style="color: #4f97d7;">}</span>
+</pre>
+</div>
+
+
+</section>
+</section>
+<section>
+<section id="slide-org0ea5102">
+<h2 id="org0ea5102">Phased rollout</h2>
+<ul>
+<li>feature-flags are per service instance</li>
+<li>many flags to flip for 10000 service instances</li>
+<li>automatic?</li>
+
+</ul>
+
+</section>
+<section id="slide-org5acfb9c">
+<h3 id="org5acfb9c">Sliding window</h3>
+<ul>
+<li>sliding window relies on <b>success condition</b></li>
+<li>in practice: service self-test</li>
+
+</ul>
+
+</section>
+<section id="slide-orgba4ea57">
+<h3 id="orgba4ea57">Procedure</h3>
+<ul>
+<li>find list of feature-flags</li>
+<li>for each;
+<ul>
+<li>go to service owning feature-flag</li>
+<li>run service self-test, early exit on fail</li>
+<li>flip feature-flag</li>
+<li>run service self-test
+<ul>
+<li>rollback on error (flip back flag)</li>
+<li>continue to next FF instance on success</li>
+
+</ul></li>
+
+</ul></li>
+
+</ul>
+
+</section>
+<section id="slide-org58a9732">
+<h3 id="org58a9732">introspection</h3>
+<ul>
+<li>feature-flag can be specific type
+<ul>
+<li>makes it a generic procedure to find through introspection</li>
+<li>flag type can indicate <i>direction</i></li>
+
+</ul></li>
+
+</ul>
+<div class="org-src-container">
+
+<pre  class="src src-yang"><span style="color: #4f97d7; font-weight: bold;">typedef</span> <span style="color: #ce537a; font-weight: bold;">ff-boolean-false-to-true</span> <span style="color: #4f97d7;">{</span>
+  <span style="color: #4f97d7; font-weight: bold;">type</span> <span style="color: #ce537a; font-weight: bold;">boolean</span>;
+  <span style="color: #4f97d7; font-weight: bold;">description</span> <span style="color: #2d9574;">"A boolean feature flag that transitions from false to true"</span>;
+  <span style="color: #4f97d7; font-weight: bold;">default</span> <span style="color: #a45bad;">false</span>;
+<span style="color: #4f97d7;">}</span>
+</pre>
+</div>
+
+</section>
+<section id="slide-orgf4e15f2">
+<h3 id="orgf4e15f2">feature-flag navigator</h3>
+<ul>
+<li>this is a mock-up</li>
+
+</ul>
+<div class="org-src-container">
+
+<pre  class="src src-org">show feature-flags feature-flags
+<span style="color: #b2b2b2; background-color: #293239;">| feature-flag                                         | type          | progress |</span>
+<span style="color: #b2b2b2; background-color: #293239;">|------------------------------------------------------+---------------+----------|</span>
+<span style="color: #b2b2b2; background-color: #293239;">| /infrastructure/base-config/feature-flags/foobar     | false-to-true |      73% |</span>
+<span style="color: #b2b2b2; background-color: #293239;">| /infrastructure/backbone-interface/feature-flags/bar | false-to-true |      14% |</span>
+
+show feature-flags instances
+<span style="color: #b2b2b2; background-color: #293239;">| instance                                                         | type          | value | complete |</span>
+<span style="color: #b2b2b2; background-color: #293239;">|------------------------------------------------------------------+---------------+-------+----------|</span>
+<span style="color: #b2b2b2; background-color: #293239;">| /infrastructure/base-config{901-R1-2053}/feature-flags/foobar    | false-to-true | false | false    |</span>
+<span style="color: #b2b2b2; background-color: #293239;">| /infrastructure/base-config{901-R1-2054}/feature-flags/foobar    | false-to-true | true  | true     |</span>
+<span style="color: #b2b2b2; background-color: #293239;">| /infrastructure/bb-intf{901-R1-2053 et-9/0/0}/feature-flags/bar  | true-to-false | false | true     |</span>
+<span style="color: #b2b2b2; background-color: #293239;">| /infrastructure/bb-intf{901-R1-2053 et-10/0/0}/feature-flags/bar | true-to-false | true  | false    |</span>
+
+</pre>
+</div>
+
+</section>
+</section>
+<section>
+<section id="slide-org9381fc5">
+<h2 id="org9381fc5">Service self-test</h2>
+<ul>
+<li>what is it in practice?</li>
+<li>a YANG action!</li>
+<li>specific to service type</li>
+<li>by returning simple common structure it can be used in generic fashion</li>
+
+</ul>
+
+</section>
+<section id="slide-org1c6e014">
+<h3 id="org1c6e014">Return generic</h3>
+<div class="column" style="float:left; width: 50%">
+<div class="org-src-container">
+
+<pre  class="src src-yang"><span style="color: #4f97d7; font-weight: bold;">action</span> <span style="color: #ce537a; font-weight: bold;">self-test</span> <span style="color: #4f97d7;">{</span>
+  tailf:info <span style="color: #2d9574;">"Perform self-test of the service"</span>;
+  tailf:actionpoint <span style="color: #2d9574;">"backbone-interface-self-test"</span>;
+  <span style="color: #4f97d7; font-weight: bold;">output</span> <span style="color: #bc6ec5;">{</span>
+    <span style="color: #4f97d7; font-weight: bold;">leaf</span> <span style="color: #ce537a; font-weight: bold;">success</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #4f97d7; font-weight: bold;">type</span> <span style="color: #ce537a; font-weight: bold;">boolean</span>;
+    <span style="color: #2d9574;">}</span>
+
+    <span style="color: #4f97d7; font-weight: bold;">container</span> <span style="color: #ce537a; font-weight: bold;">interface</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #2aa1ae; background-color: #292e34;">// </span><span style="color: #2aa1ae; background-color: #292e34;">service specific health / state about the interface</span>
+    <span style="color: #2d9574;">}</span>
+    <span style="color: #4f97d7; font-weight: bold;">container</span> <span style="color: #ce537a; font-weight: bold;">is-is</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #2aa1ae; background-color: #292e34;">// </span><span style="color: #2aa1ae; background-color: #292e34;">service specific health / state about IS-IS</span>
+    <span style="color: #2d9574;">}</span>
+    <span style="color: #4f97d7; font-weight: bold;">container</span> <span style="color: #ce537a; font-weight: bold;">pim</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #2aa1ae; background-color: #292e34;">// </span><span style="color: #2aa1ae; background-color: #292e34;">service specific health / state about PIM</span>
+    <span style="color: #2d9574;">}</span>
+  <span style="color: #bc6ec5;">}</span>
+<span style="color: #4f97d7;">}</span>
+</pre>
+</div>
+</div>
+
+<div class="column" style="float:right; width: 50%">
+<div class="org-src-container">
+
+<pre  class="src src-yang"><span style="color: #4f97d7; font-weight: bold;">action</span> <span style="color: #ce537a; font-weight: bold;">self-test</span> <span style="color: #4f97d7;">{</span>
+  tailf:info <span style="color: #2d9574;">"Perform self-test of the service"</span>;
+  tailf:actionpoint <span style="color: #2d9574;">"ibgp-neighbor-self-test"</span>;
+  <span style="color: #4f97d7; font-weight: bold;">output</span> <span style="color: #bc6ec5;">{</span>
+    <span style="color: #4f97d7; font-weight: bold;">leaf</span> <span style="color: #ce537a; font-weight: bold;">success</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #4f97d7; font-weight: bold;">type</span> <span style="color: #ce537a; font-weight: bold;">boolean</span>;
+    <span style="color: #2d9574;">}</span>
+
+    <span style="color: #4f97d7; font-weight: bold;">container</span> <span style="color: #ce537a; font-weight: bold;">bgp</span> <span style="color: #2d9574;">{</span>
+      <span style="color: #2aa1ae; background-color: #292e34;">// </span><span style="color: #2aa1ae; background-color: #292e34;">BGP specific health / state</span>
+    <span style="color: #2d9574;">}</span>
+  <span style="color: #bc6ec5;">}</span>
+<span style="color: #4f97d7;">}</span>
+</pre>
+</div>
+</div>
+</section>
+<section id="slide-orgca0daef">
+<h3 id="orgca0daef">Example</h3>
+<div class="org-src-container">
+
+<pre  class="src src-python"><span style="color: #4f97d7; font-weight: bold;">def</span> <span style="color: #bc6ec5; font-weight: bold;">get_state</span><span style="color: #4f97d7;">(</span>kp_unused, log, root=<span style="color: #a45bad;">None</span>, service=<span style="color: #a45bad;">None</span>, action_output=<span style="color: #a45bad;">None</span><span style="color: #4f97d7;">)</span>:
+    log.info<span style="color: #4f97d7;">(</span><span style="color: #2d9574;">"get_state for {} {}"</span>.<span style="color: #4f97d7;">format</span><span style="color: #bc6ec5;">(</span>service.device, service.interface<span style="color: #bc6ec5;">)</span><span style="color: #4f97d7;">)</span>
+    <span style="color: #7590db;">dev</span> = root.devices.device<span style="color: #4f97d7;">[</span>service.device<span style="color: #4f97d7;">]</span>
+    <span style="color: #7590db;">os</span> = utils.get_dev_os<span style="color: #4f97d7;">(</span>dev<span style="color: #4f97d7;">)</span>
+    <span style="color: #7590db;">state</span> = service.state
+
+</pre>
+</div>
+</section>
+</section>
+</div>
+</div>
+<script src="./reveal.js/lib/js/head.min.js"></script>
+<script src="./reveal.js/js/reveal.js"></script>
+<script>
+// Full list of configuration options available here:
+// https://github.com/hakimel/reveal.js#configuration
+Reveal.initialize({
+
+controls: true,
+progress: true,
+history: false,
+center: true,
+slideNumber: 'c',
+rollingLinks: false,
+keyboard: true,
+mouseWheel: false,
+fragmentInURL: false,
+hashOneBasedIndex: false,
+pdfSeparateFragments: true,
+
+overview: true,
+
+theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
+transition: Reveal.getQueryHash().transition || 'none', // see README of reveal.js for options
+transitionSpeed: 'default',
+
+// Optional libraries used to extend on reveal.js
+dependencies: [
+ { src: './reveal.js/lib/js/classList.js', condition: function() { return !document.body.classList; } },
+ { src: './reveal.js/plugin/markdown/marked.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+ { src: './reveal.js/plugin/markdown/markdown.js', condition: function() { return !!document.querySelector( '[data-markdown]' ); } },
+ { src: './reveal.js/plugin/zoom-js/zoom.js', async: true, condition: function() { return !!document.body.classList; } },
+ { src: './reveal.js/plugin/notes/notes.js', async: true, condition: function() { return !!document.body.classList; } }]
+
+});
+</script>
+</body>
+</html>

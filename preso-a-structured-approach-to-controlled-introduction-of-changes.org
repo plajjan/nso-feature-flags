@@ -1,0 +1,389 @@
+#+TITLE: A structured approach to controlled introduction of changes
+#+AUTHOR: Kristian Larsson
+#+EMAIL: krlarsso@cisco.com
+#+LANGUAGE: en
+#+FILETAGS: NSO
+#+OPTIONS: reveal_title_slide:nil toc:nil num:nil H:4 ^:nil pri:t timestamp:nil
+#+REVEAL_TITLE_SLIDE:
+#+REVEAL_THEME: white
+#+REVEAL_TRANS: none
+#+REVEAL_EXTRA_CSS: preso.css
+#+MACRO: color @@html:<font color="$1">$2</font>@@
+
+* A structured approach to controlled introduction of changes
+
+* Agenda
+  - nomenclature
+  - phased rollout success condition
+    - configuration validity & service health
+  - life cycle management / introducing change
+    - problem definition
+  - a solution: feature-flags
+
+* Automation changes over time
+  - automation is the embodiment of processes in programmatic fashion
+  - products and processes change, thus automation must change over time
+
+* Nomenclature
+  - blast radius containment
+  - phased rollout
+
+* Blast radius containment
+  - strictly about limiting impact of a change
+  - for example, make sure we cannot commit to more than X devices in one transaction
+    - this would prevent making one network wide transaction changing all instances of Y at the same time
+
+* Phased rollout
+  - method of rolling out a change in controlled fashion by applying a subset of the change at a time
+  - for example, total change is to 1000 devices
+    - start by changing one device
+    - validate change went well
+    - proceed with changing next device
+    - validate and proceed to next
+    - repeat for all devices...
+      - or abort on failure
+
+** Phased rollout success condition
+   - key to phased rollout is concept of *success condition*
+   - we roll out change in small parts - sliding window
+   - how do we know if a change went well?
+   - how do we know if we can proceed and configure next device?
+
+** Configuration validity
+   - configuration commit only includes syntax and semantic checks
+     - an empty configuration is valid
+       - but would lead to unhealthy device / service
+   - thus, need concept of *success condition* beyond basic config validity
+
+** Service health
+   - need to understand if service is *healthy*
+   - monitor operational state of service
+     - is BGP neighbor up?
+     - is interface up?
+     - can we ping?
+   - service specific! not generic...
+
+* Introducing (naive) change
+  - change service configuration template
+  - git commit
+  - deploy new NSO package
+  - re-deploy service instances
+  -> new config is now active in network
+  
+** Example change
+   - modify MTU of service from default (1500) to 9100
+    
+** Change service template
+   #+BEGIN_SRC xml
+     <config-template xmlns="http://tail-f.com/ns/config/1.0">
+         <devices xmlns="http://tail-f.com/ns/ncs">
+
+             <device tags="nocreate">
+                 <name>{/device}</name>
+                 <config tags="merge">
+                     <interface-configurations xmlns="http://cisco.com/ns/yang/Cisco-IOS-XR-ifmgr-cfg">
+                         <interface-configuration>
+                             <active>act</active>
+                             <interface-name>{/interface}</interface-name>
+                             <description>Link to {/remote/device} [{/remote/interface}]</description>
+                             <mtus>
+                                 <mtu>
+                                     <owner>{$INTERFACE_TYPE}</owner>
+                                     <!-- new hard-coded MTU -->
+                                     <mtu>9100</mtu>
+                                 </mtu>
+                             </mtus>
+                             <shutdown tags="delete" when="{/shutdown='false'}"/>
+                             <!-- ... other config stuff ... -->
+                         </interface-configuration>
+                     </interface-configurations>
+                 </config>
+             </device>
+         </devices>
+     </config-template>
+   #+END_SRC
+
+** Benefit of hard-coded value
+   - *no* choice means *avoiding* test cases - good!
+   - configurable MTU means we need to test all or reasonable set of values
+   - combinatorial explosion with many config knobs
+
+** {{{color(white, Loaded gun scenario)}}}
+   :PROPERTIES:
+   :reveal_background: ./loaded-gun.jpg
+   :END:
+
+** latent change = loaded gun
+   - latent change in service code = loaded gun
+     - starts when service package is deployed
+     - end when service is re-deployed
+   #+BEGIN_SRC ditaa :file loaded-gun-timeframe.png :cache yes :cmdline --scale 2 -E -S
+     package deploy            service re‐deploy
+            |                         |
+            |                         |
+            v                         v
+     time ---------------------------------------->
+            |                         |
+            |                         |
+            |<----- loaded gun ------>|
+            |                         |
+   #+END_SRC
+
+   #+RESULTS[ffcc36bbcda4ed6df117fdce5737757136390f8e]:
+   [[file:loaded-gun-timeframe.png]]
+  
+** Kalle fired the gun
+   - anyone else coming in doing (trivial) change in loaded gun window will inadvertently push MTU change
+     - Kalle wants to fix spelling mistake in description
+       - considered trivial, didn't do ~commit dry-run~
+       - pushes MTU change causing service outage
+
+** No revert
+   - template change & re-deploy moves forward
+   - no way back
+     - except rollback, but only works for naive scenario
+     - interleaved transactions make rollback useless
+   #+BEGIN_SRC ditaa :file re-deploy-rollback-bad-flow.png :cache yes :cmdline --scale 2 -E -S
+     package deploy   other config change
+            |                |
+            |                |
+            v                v
+     time ---------------------------------------->
+                    ^                ^
+                    |                |
+                    |                |
+             service re‐deploy     rollback
+   #+END_SRC
+
+   #+RESULTS[429d030088a55196a7f84388628642b5572473c5]:
+   [[file:re-deploy-rollback-bad-flow.png]]
+  
+** Feature grouping
+   - we implement feature A and feature B
+   - both are merged to master & deploy new NSO package
+   - service re-deploy deploys both A & B
+     - impossible to selectively enable A or B
+     - if A or B causes problems we need to roll back both
+   - BAD: feature A & B have inadvertently been *grouped* together
+     - development time is *tightly coupled* to operations
+
+* goals
+  - no loaded gun
+  - going backwards rollback
+  - success condition / service health
+  - avoid combinatorial explosion
+    - allows testing
+
+* feature-flags
+  - well known concept in software development
+  - move introduction of change from commit/deploy time to run time
+    - temporal decoupling of development and operations!!!
+  - focus on transition / change
+  - limited life time
+
+** Feature-flag
+   - emphasize old -> new transition
+   #+BEGIN_SRC yang
+     list backbone-interface {
+       key "device interface";
+       // other things
+
+       container feature-flags {
+         leaf high-mtu {
+           type boolean;
+           description "Enable new high MTU (9100). Disable for old MTU (1500)";
+           default "false";
+         }
+       }
+     }
+   #+END_SRC
+    
+** Feature-flag in template
+   #+BEGIN_SRC xml
+     <config-template xmlns="http://tail-f.com/ns/config/1.0">
+         <devices xmlns="http://tail-f.com/ns/ncs">
+
+             <device tags="nocreate">
+                 <name>{/device}</name>
+                 <config tags="merge">
+                     <interface-configurations xmlns="http://cisco.com/ns/yang/Cisco-IOS-XR-ifmgr-cfg">
+                         <interface-configuration>
+                             <active>act</active>
+                             <interface-name>{/interface}</interface-name>
+                             <description>Link to {/remote/device} [{/remote/interface}]</description>
+                             <mtus>
+                                 <mtu>
+                                     <owner>{$INTERFACE_TYPE}</owner>
+                                     <!-- new high MTU conditioned on feature-flags -->
+                                     <mtu when="/feature-flags/high-mtu='true'">9100</mtu>
+                                 </mtu>
+                             </mtus>
+                             <shutdown tags="delete" when="{/shutdown='false'}"/>
+                             <!-- ... other config stuff ... -->
+                         </interface-configuration>
+                     </interface-configurations>
+                 </config>
+             </device>
+         </devices>
+     </config-template>
+   #+END_SRC
+
+** Sociotechnical
+   - technically, FF is /just another input/
+   - NSO won't treat it differently
+   - difference is in concept
+     - clear life cycle for FF
+     - introduce FF for change transition
+     - when done, *remove* FF
+       - keeps down input / permutations over time
+
+** feature-flag life cycle
+   [[./ff-lifecycle.png]]
+   
+** ANTI-PATTERN
+   - we could introduce new MTU leaf
+   - allows arbitrary pick of MTU
+   - BAD - we want choice of 1500 or 9100
+   - reduce choice / permutations
+   #+BEGIN_SRC yang
+     list backbone-interface {
+       key "device interface";
+       // other things
+
+       leaf mtu {
+         type uint16 {
+           range "1500..9100";
+         }
+         description "MTU of service";
+         default "1500";
+       }
+     }
+   #+END_SRC
+
+** ANTI-PATTERN
+   - better, reduction of choice to 2 values
+   - still, over time, new config knobs leads to combinatorial explosion
+   - focus on transitional nature
+   #+BEGIN_SRC yang
+     list backbone-interface {
+       key "device interface";
+       // other things
+
+       leaf mtu {
+         type uint16 {
+           range "1500 | 9100";
+         }
+         description "MTU of service, either 1500 (old) or 9100 (new)";
+         default "1500";
+       }
+     }
+   #+END_SRC
+    
+
+* Phased rollout
+  - feature-flags are per service instance
+  - many flags to flip for 10000 service instances
+  - automatic?
+
+** Sliding window
+   - sliding window relies on *success condition*
+   - in practice: service self-test
+
+** Procedure
+   - find list of feature-flags
+   - for each;
+     - go to service owning feature-flag
+     - run service self-test, early exit on fail
+     - flip feature-flag
+     - run service self-test
+       - rollback on error (flip back flag)
+       - continue to next FF instance on success
+
+** introspection
+   - feature-flag can be specific type
+     - makes it a generic procedure to find through introspection
+     - flag type can indicate /direction/
+   #+BEGIN_SRC yang
+     typedef ff-boolean-false-to-true {
+       type boolean;
+       description "A boolean feature flag that transitions from false to true";
+       default false;
+     }
+   #+END_SRC
+
+** feature-flag navigator
+   - this is a mock-up
+   #+BEGIN_SRC org
+     show feature-flags feature-flags
+     | feature-flag                                         | type          | progress |
+     |------------------------------------------------------+---------------+----------|
+     | /infrastructure/base-config/feature-flags/foobar     | false-to-true |      73% |
+     | /infrastructure/backbone-interface/feature-flags/bar | false-to-true |      14% |
+
+     show feature-flags instances
+     | instance                                                         | type          | value | complete |
+     |------------------------------------------------------------------+---------------+-------+----------|
+     | /infrastructure/base-config{901-R1-2053}/feature-flags/foobar    | false-to-true | false | false    |
+     | /infrastructure/base-config{901-R1-2054}/feature-flags/foobar    | false-to-true | true  | true     |
+     | /infrastructure/bb-intf{901-R1-2053 et-9/0/0}/feature-flags/bar  | true-to-false | false | true     |
+     | /infrastructure/bb-intf{901-R1-2053 et-10/0/0}/feature-flags/bar | true-to-false | true  | false    |
+
+   #+END_SRC
+
+* Service self-test
+  - what is it in practice?
+  - a YANG action!
+  - specific to service type
+  - by returning simple common structure it can be used in generic fashion
+
+** Return generic
+   #+REVEAL_HTML: <div class="column" style="float:left; width: 50%">
+   #+BEGIN_SRC yang
+     action self-test {
+       tailf:info "Perform self-test of the service";
+       tailf:actionpoint "backbone-interface-self-test";
+       output {
+         leaf success {
+           type boolean;
+         }
+    
+         container interface {
+           // service specific health / state about the interface
+         }
+         container is-is {
+           // service specific health / state about IS-IS
+         }
+         container pim {
+           // service specific health / state about PIM
+         }
+       }
+     }
+   #+END_SRC
+  #+REVEAL_HTML: </div>
+  
+  #+REVEAL_HTML: <div class="column" style="float:right; width: 50%">
+   #+BEGIN_SRC yang
+     action self-test {
+       tailf:info "Perform self-test of the service";
+       tailf:actionpoint "ibgp-neighbor-self-test";
+       output {
+         leaf success {
+           type boolean;
+         }
+    
+         container bgp {
+           // BGP specific health / state
+         }
+       }
+     }
+   #+END_SRC
+  #+REVEAL_HTML: </div>
+** Example
+   #+BEGIN_SRC python
+     def get_state(kp_unused, log, root=None, service=None, action_output=None):
+         log.info("get_state for {} {}".format(service.device, service.interface))
+         dev = root.devices.device[service.device]
+         os = utils.get_dev_os(dev)
+         state = service.state
+
+   #+END_SRC
